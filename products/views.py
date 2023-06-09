@@ -1,46 +1,49 @@
-from django.shortcuts import render, HttpResponse
-from .models import Category, Product
-
+from django.shortcuts import render, get_object_or_404
+from .models import Product, SellerProductPrice, Comment
+from django.db.models import Min, Max
 # Create your views here.
 
 
-def index(request):
-    categories = Category.objects.all()
-    products = Product.objects.all()[:10]
-    category_response = ''
-    for c in categories:
-        category_response += f'<li>{c.name}</li>'
-    category_response = f"<ul>{category_response}</ul>"
+def product_list_view(request):
+    page = int(request.GET.get('page', 1))
+    query = Product.objects.all()
+    q = request.GET.get('q', '')
+    if q:
+        query = query.filter(name__contains=q)
+    page_size = 10
+    products = query[(page-1) * page_size:page*page_size]
+    context = {"products": products}
 
-    product_response = ''
-    for p in products:
-        product_response += f'<li><a href="/products/{p.id}">{p.name}</a></li>'
-    product_response = f"<ul>{product_response}</ul>"
-
-    return HttpResponse(f"""
-                        <html>
-                        <head><title>Digikala</title></head>
-                        <body>
-                        <h1>the best seller site in iran</h1>
-                        {category_response}
-                        {product_response}
-                        </body>
-                        </html>
-                        """)
+    return render(
+        template_name='products/product-list.html',
+        request=request,
+        context=context,
+    )
 
 
-def product_view(request, product_id):
-    try:
-        p = Product.objects.get(id=product_id)
-        return HttpResponse(f"""
-                        <html>
-                        <head><title>Digikala</title></head>
-                        <body>
-                        <h1> {p.name}</h1>
-                        <h5>{p.en_name}</h5>
-                        <p>{p.description}</p>
-                        </body>
-                        </html>
-                        """)
-    except Product.DoesNotExist:
-        return HttpResponse('404 Products not found')
+def product_detail_view(request, pk):
+    p = get_object_or_404(Product, pk=pk)
+    # s = p.seller_prices.all().values('id').annotate(
+    #     min=Min('update_at'))
+    # print(s)
+    # print(d)
+    if request.method == "POST":
+        comment = Comment.objects.create(
+            user_email=request.POST.get("user_email", ''),
+            title=request.POST.get("title", ''),
+            text=request.POST.get("text", ''),
+            rate=int(request.POST.get("rate", 0)),
+            product=p
+        )
+    seller_prices = SellerProductPrice.objects.raw(
+        f"""select * from products_sellerproductprice 
+        where product_id = {p.id}
+        group by seller_id
+        having Max(update_at)""")
+    context = {"product": p, "seller_prices": seller_prices,
+               "comment_counts": p.comment_set.all().count()}
+    return render(
+        template_name='products/product_detail.html',
+        request=request,
+        context=context
+    )
